@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 load_dotenv()  # reads backend/.env if present
 
 API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+# Models are tried in order. GEMINI_MODEL (if set) goes first, then the defaults.
+MODELS = [m for m in [os.getenv("GEMINI_MODEL"), "gemini-2.5-flash", "gemini-2.0-flash"] if m]
+LAST_ERROR = {"msg": None}
 
 BLOCKED = re.compile(
     r"\b(captain|fantasy|dream ?11|bet|betting|contest|contests|my team|who to pick|should i pick)\b",
@@ -40,18 +42,31 @@ async def _llm(task: str, facts: dict, lang: str) -> str | None:
         f"{SYSTEM}\n{LANG_RULE[lang]}\n\nMATCH FACTS:\n"
         f"{json.dumps(facts, ensure_ascii=False)}\n\nTASK:\n{task}"
     )
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(
-            url,
-            params={"key": API_KEY},
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300},
-            },
-        )
-        r.raise_for_status()
-    return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    last_err = None
+    async with httpx.AsyncClient(timeout=25) as client:
+        for model in dict.fromkeys(MODELS):   # try each model once, in order
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            try:
+                r = await client.post(
+                    url,
+                    params={"key": API_KEY},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 300},
+                    },
+                )
+                if r.status_code != 200:
+                    last_err = f"{model}: HTTP {r.status_code}"
+                    print("Gemini error:", last_err, r.text[:300])
+                    continue
+                text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                LAST_ERROR["msg"] = None
+                return text
+            except Exception as e:  # never print the key; only the error type
+                last_err = f"{model}: {type(e).__name__}"
+                print("Gemini exception:", last_err)
+    LAST_ERROR["msg"] = last_err
+    return None
 
 
 async def _answer(task: str, facts: dict, lang: str, fallback: str) -> str:
@@ -64,20 +79,36 @@ async def _answer(task: str, facts: dict, lang: str, fallback: str) -> str:
     return fallback
 
 
+def llm_status() -> dict:
+    return {
+        "enabled": bool(API_KEY),
+        "models": list(dict.fromkeys(MODELS)),
+        "last_error": LAST_ERROR["msg"],
+    }
+
+
 # ---------- rule-based fallbacks (used when no API key or the call fails) ----------
 
 PRESSURE_EN = {"high": "under high pressure", "tightening": "tightening", "on_track": "on track"}
 PRESSURE_HI = {"high": "पर दबाव ज़्यादा है", "tightening": "कस रहा है", "on_track": "ठीक चल रहा है"}
 
-# Order matters: the first matching intent wins.
+# Order matters: the first matching intent wins. "next" is checked before "watch"
+# so "next batter" is not treated as a question about what to watch.
 INTENTS = [
     ("top", r"score[sd]? more|most runs|highest|top scor|who scored|sabse|सबसे|ज़्यादा रन|ज्यादा रन"),
-    ("winner", r"winner|won|\bwin\b|result|jeet|जीत|जीता|किसने"),
+    ("winner", r"winner|\bwon\b|\bwin\b|result|jeet|जीत|जीता|किसने"),
+    ("strike", r"strike|\bsr\b|स्ट्राइक"),
+    ("next", r"\bnext\b|who comes|next man|अगला"),
+    ("batting", r"batting|at the crease|on strike|who is playing|crease|क्रीज़"),
     ("score", r"\bscore\b|scorecard|score card|runs so far|कितने रन|स्कोर"),
     ("rrr", r"required|\brrr\b|needed rate|आवश्यक"),
     ("realistic", r"realistic|possible|chance|winnable|संभव|मुमकिन"),
-    ("watch", r"watch|should|next|focus|ध्यान|देखें"),
+    ("watch", r"watch|should|focus|ध्यान|देखें"),
 ]
+
+
+def _sr(runs: int, balls: int) -> float:
+    return round(runs * 100 / balls, 1) if balls else 0.0
 
 
 def _winner_line(s: dict, lang: str) -> str:
@@ -116,6 +147,22 @@ def _judgement(s: dict, lang: str) -> str:
         if lang == "hi"
         else "It's very difficult from here unless they hit big shots."
     )
+
+
+def _find_batter(question: str, s: dict) -> dict | None:
+    """Match a batter by any part of their name in the question, e.g. 'Aditya' or 'Shah'."""
+    tokens = set(re.findall(r"\w+", question.lower()))
+    for b in s["batting_card"]:
+        if any(part.lower() in tokens for part in b["name"].split()):
+            return b
+    return None
+
+
+def _batter_line(b: dict, lang: str) -> str:
+    sr = _sr(b["runs"], b["balls"])
+    if lang == "hi":
+        return f"{b['name']}: {b['runs']} रन, {b['balls']} गेंदों में, स्ट्राइक रेट {sr}।"
+    return f"{b['name']}: {b['runs']} off {b['balls']} balls, strike rate {sr}."
 
 
 def _fallback_catchup(s: dict, lang: str) -> str:
@@ -168,11 +215,29 @@ def _fallback_explain(event: dict, s: dict, lang: str) -> str:
             f"a required rate of {s['rrr']}.")
 
 
+HELP = {
+    "en": (
+        "I can answer about the score, who is batting, the required rate, a batter's runs and strike rate "
+        "(for example, 'Aditya strike rate'), the top scorer, whether the chase is realistic, or what to watch. "
+        "Try one of those."
+    ),
+    "hi": (
+        "मैं स्कोर, कौन बल्लेबाज़ी कर रहा है, आवश्यक रन रेट, किसी बल्लेबाज़ के रन और स्ट्राइक रेट, "
+        "टॉप स्कोरर, चेज़ संभव है या नहीं, या क्या देखें, इन सवालों के जवाब दे सकता हूँ। इनमें से कोई सवाल पूछें।"
+    ),
+}
+
+
 def _fallback_ask(question: str, s: dict, lang: str) -> str:
     hi = lang == "hi"
     q = question.lower()
-    intent = next((name for name, pat in INTENTS if re.search(pat, q)), "summary")
+    intent = next((name for name, pat in INTENTS if re.search(pat, q)), "unknown")
     over = s["status"] != "in_progress"
+    batter = _find_batter(question, s)
+
+    # A named batter: answer about that batter.
+    if batter and intent in ("unknown", "score", "strike"):
+        return _batter_line(batter, lang)
 
     if intent == "winner":
         if over:
@@ -195,6 +260,27 @@ def _fallback_ask(question: str, s: dict, lang: str) -> str:
                     f"{second['name']} ने {second['runs']} रन बनाए ({second['balls']} गेंदें)।")
         return (f"{first['name']} has scored more: {first['runs']} off {first['balls']} balls. "
                 f"{second['name']} has {second['runs']} off {second['balls']}.")
+
+    if intent == "strike":
+        top = s["batting_card"][:2]
+        if not top:
+            return "अभी तक किसी बल्लेबाज़ ने गेंद नहीं खेली है।" if hi else "No batter has faced a ball yet."
+        parts = [f"{b['name']} {_sr(b['runs'], b['balls'])}" for b in top]
+        if hi:
+            return "स्ट्राइक रेट: " + ", ".join(parts) + ". नाम लिखकर किसी एक बल्लेबाज़ के बारे में भी पूछ सकते हैं।"
+        return "Strike rates: " + ", ".join(parts) + ". Ask about a batter by name for their full numbers."
+
+    if intent == "next":
+        return ("मैच की फ़ीड में बल्लेबाज़ी का क्रम नहीं दिखता, इसलिए मैं अगले बल्लेबाज़ का नाम नहीं बता सकता।" if hi
+                else "The feed doesn't show the batting order, so I can't tell who is next in.")
+
+    if intent == "batting":
+        if over:
+            return "मैच खत्म हो चुका है, अभी कोई बल्लेबाज़ी नहीं कर रहा।" if hi else "The match is over, so no one is batting now."
+        batters = _batters_line(s, lang)
+        if hi:
+            return f"अभी बल्लेबाज़ी में: {batters}।"
+        return f"Currently batting: {batters}."
 
     if intent == "score":
         base = _fallback_summary(s, lang)
@@ -230,7 +316,8 @@ def _fallback_ask(question: str, s: dict, lang: str) -> str:
                 f"Watch the next few overs closely. The {10 - s['wickets']} wickets in hand matter as much "
                 f"as the scoring rate.")
 
-    return _fallback_summary(s, lang)
+    # Nothing matched: say so honestly and show what can be asked.
+    return f"{_fallback_summary(s, lang)} {HELP[lang]}"
 
 
 # ---------- public functions ----------

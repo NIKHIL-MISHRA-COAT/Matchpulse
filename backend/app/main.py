@@ -43,6 +43,11 @@ def _title() -> str:
     return f"{BATTING_TEAM} chasing {TARGET} · {SCENARIOS[STATE['idx']]['name']}"
 
 
+@app.get("/api/health")
+def health():
+    return {"ok": True, "llm": ai.llm_status()}
+
+
 @app.get("/api/match")
 def get_match():
     upto = LIVE["upto"]
