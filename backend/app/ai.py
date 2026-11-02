@@ -5,6 +5,9 @@ import os
 import re
 
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv()  # reads backend/.env if present
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
@@ -66,12 +69,58 @@ async def _answer(task: str, facts: dict, lang: str, fallback: str) -> str:
 PRESSURE_EN = {"high": "under high pressure", "tightening": "tightening", "on_track": "on track"}
 PRESSURE_HI = {"high": "पर दबाव ज़्यादा है", "tightening": "कस रहा है", "on_track": "ठीक चल रहा है"}
 
+# Order matters: the first matching intent wins.
+INTENTS = [
+    ("top", r"score[sd]? more|most runs|highest|top scor|who scored|sabse|सबसे|ज़्यादा रन|ज्यादा रन"),
+    ("winner", r"winner|won|\bwin\b|result|jeet|जीत|जीता|किसने"),
+    ("score", r"\bscore\b|scorecard|score card|runs so far|कितने रन|स्कोर"),
+    ("rrr", r"required|\brrr\b|needed rate|आवश्यक"),
+    ("realistic", r"realistic|possible|chance|winnable|संभव|मुमकिन"),
+    ("watch", r"watch|should|next|focus|ध्यान|देखें"),
+]
+
+
+def _winner_line(s: dict, lang: str) -> str:
+    if s["status"] == "won":
+        n = 10 - s["wickets"]
+        if lang == "hi":
+            return f"{s['batting_team']} ने {n} विकेट से जीत दर्ज की।"
+        return f"{s['batting_team']} won by {n} wickets."
+    n = s["need"] - 1
+    if lang == "hi":
+        return f"{s['bowling_team']} ने {n} रन से जीत दर्ज की।"
+    return f"{s['bowling_team']} won by {n} runs."
+
+
+def _batters_line(s: dict, lang: str) -> str:
+    parts = []
+    for key in ("on_strike", "non_striker"):
+        b = s[key]
+        if b:
+            parts.append(f"{b['name']} {b['runs']}({b['balls']})")
+    sep = " और " if lang == "hi" else " and "
+    return sep.join(parts)
+
+
+def _judgement(s: dict, lang: str) -> str:
+    if s["rrr"] <= s["crr"]:
+        return "मौजूदा रफ़्तार से यह संभव लगता है।" if lang == "hi" else "On current pace this looks realistic."
+    if s["rrr"] <= s["crr"] + 2:
+        return (
+            "मुश्किल है, पर विकेट बचे रहे तो संभव है।"
+            if lang == "hi"
+            else "It's tough, but still possible if they keep wickets in hand."
+        )
+    return (
+        "अब यह बहुत मुश्किल है, जब तक बड़े शॉट न लगें।"
+        if lang == "hi"
+        else "It's very difficult from here unless they hit big shots."
+    )
+
 
 def _fallback_catchup(s: dict, lang: str) -> str:
     if s["status"] != "in_progress":
-        if lang == "hi":
-            return f"मैच खत्म हो चुका है: {s['batting_team']} {s['runs']}/{s['wickets']} पर, {s['overs']} ओवर में।"
-        return f"The chase is over: {s['batting_team']} are {s['runs']}/{s['wickets']} after {s['overs']} overs."
+        return _fallback_summary(s, lang)
     lo = s["last_over"]
     if lang == "hi":
         return (
@@ -87,6 +136,18 @@ def _fallback_catchup(s: dict, lang: str) -> str:
         f"The chase is {PRESSURE_EN[s['pressure']]}. In the last over they scored {lo['runs']} run(s) and lost {lo['wickets']} wicket(s). "
         f"The current partnership is {s['partnership_runs']} runs."
     )
+
+
+def _fallback_summary(s: dict, lang: str) -> str:
+    if lang == "hi":
+        base = f"{s['batting_team']} {s['runs']}/{s['wickets']} पर, {s['overs']} ओवर में।"
+    else:
+        base = f"{s['batting_team']} are {s['runs']}/{s['wickets']} after {s['overs']} overs."
+    if s["status"] != "in_progress":
+        return f"{base} {_winner_line(s, lang)}"
+    if lang == "hi":
+        return f"{base} जीत के लिए {s['need']} रन चाहिए, {s['balls_left']} गेंदें बाकी हैं।"
+    return f"{base} They need {s['need']} from {s['balls_left']} balls."
 
 
 def _fallback_explain(event: dict, s: dict, lang: str) -> str:
@@ -107,22 +168,69 @@ def _fallback_explain(event: dict, s: dict, lang: str) -> str:
             f"a required rate of {s['rrr']}.")
 
 
-def _fallback_ask(s: dict, lang: str) -> str:
-    if s["need"] <= 0:
-        return "लक्ष्य पूरा हो चुका है।" if lang == "hi" else "They have already reached the target."
-    if s["rrr"] <= s["crr"]:
-        judge_en, judge_hi = "On current pace this looks realistic.", "मौजूदा रफ़्तार से यह संभव लगता है।"
-    elif s["rrr"] <= s["crr"] + 2:
-        judge_en = "It's tough, but still possible if they keep wickets in hand."
-        judge_hi = "मुश्किल है, पर विकेट बचे रहे तो संभव है।"
-    else:
-        judge_en = "It's very difficult from here unless they hit big shots."
-        judge_hi = "अब यह बहुत मुश्किल है, जब तक बड़े शॉट न लगें।"
-    if lang == "hi":
+def _fallback_ask(question: str, s: dict, lang: str) -> str:
+    hi = lang == "hi"
+    q = question.lower()
+    intent = next((name for name, pat in INTENTS if re.search(pat, q)), "summary")
+    over = s["status"] != "in_progress"
+
+    if intent == "winner":
+        if over:
+            return _winner_line(s, lang)
+        return (f"मैच जारी है। {s['batting_team']} को {s['balls_left']} गेंदों में {s['need']} रन चाहिए।"
+                if hi else
+                f"The match is still on. {s['batting_team']} need {s['need']} from {s['balls_left']} balls.")
+
+    if intent == "top":
+        top = s["batting_card"][:2]
+        if not top:
+            return "अभी तक किसी बल्लेबाज़ ने गेंद नहीं खेली है।" if hi else "No batter has faced a ball yet."
+        first = top[0]
+        if len(top) == 1:
+            return (f"{first['name']} ने {first['runs']} रन बनाए ({first['balls']} गेंदें)।" if hi
+                    else f"{first['name']} has the most runs: {first['runs']} off {first['balls']} balls.")
+        second = top[1]
+        if hi:
+            return (f"{first['name']} ने सबसे ज़्यादा {first['runs']} रन बनाए ({first['balls']} गेंदें)। "
+                    f"{second['name']} ने {second['runs']} रन बनाए ({second['balls']} गेंदें)।")
+        return (f"{first['name']} has scored more: {first['runs']} off {first['balls']} balls. "
+                f"{second['name']} has {second['runs']} off {second['balls']}.")
+
+    if intent == "score":
+        base = _fallback_summary(s, lang)
+        batters = _batters_line(s, lang)
+        if batters:
+            return f"{base} {'अभी बल्लेबाज़ी में' if hi else 'Currently batting:'} {batters}."
+        return base
+
+    if intent == "rrr":
+        if over:
+            return ("मैच खत्म हो चुका है, इसलिए आवश्यक रन रेट अब मायने नहीं रखता।" if hi
+                    else "The match is over, so the required rate no longer matters.")
+        return (f"आवश्यक रन रेट {s['rrr']} है ({s['need']} रन, {s['balls_left']} गेंदें), जबकि मौजूदा रन रेट {s['crr']} है।"
+                if hi else
+                f"The required rate is {s['rrr']} ({s['need']} runs from {s['balls_left']} balls), "
+                f"against a current rate of {s['crr']}.")
+
+    if intent == "realistic":
+        if over:
+            return _winner_line(s, lang)
         return (f"{s['need']} रन {s['balls_left']} गेंदों में चाहिए, आवश्यक रन रेट {s['rrr']} बनाम मौजूदा {s['crr']}, "
-                f"और {10 - s['wickets']} विकेट बचे हैं। {judge_hi} यह लाइव आंकड़ों पर आधारित है, भविष्यवाणी नहीं।")
-    return (f"They need {s['need']} from {s['balls_left']} balls, a required rate of {s['rrr']} against a current rate of "
-            f"{s['crr']}, with {10 - s['wickets']} wickets in hand. {judge_en} This is based on live numbers, not a prediction.")
+                f"और {10 - s['wickets']} विकेट बचे हैं। {_judgement(s, lang)}"
+                if hi else
+                f"They need {s['need']} from {s['balls_left']} balls, a required rate of {s['rrr']} against "
+                f"{s['crr']}, with {10 - s['wickets']} wickets in hand. {_judgement(s, lang)} "
+                f"This is based on live numbers, not a prediction.")
+
+    if intent == "watch":
+        if over:
+            return _winner_line(s, lang)
+        return (f"अगले कुछ ओवरों पर नज़र रखें। विकेट ({10 - s['wickets']} बचे) रन रेट जितने ही अहम हैं।"
+                if hi else
+                f"Watch the next few overs closely. The {10 - s['wickets']} wickets in hand matter as much "
+                f"as the scoring rate.")
+
+    return _fallback_summary(s, lang)
 
 
 # ---------- public functions ----------
@@ -143,4 +251,4 @@ async def answer(question: str, state: dict, lang: str) -> tuple[str, bool]:
     if BLOCKED.search(question):
         return REFUSAL[lang], True
     task = f"Answer this fan question using only the facts: {question}"
-    return await _answer(task, state, lang, _fallback_ask(state, lang)), False
+    return await _answer(task, state, lang, _fallback_ask(question, state, lang)), False

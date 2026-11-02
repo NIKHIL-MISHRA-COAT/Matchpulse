@@ -28,10 +28,13 @@ def compute_state(events: list[dict], upto: int) -> dict:
 
     if runs >= TARGET:
         status = "won"
+        winner = BATTING_TEAM
     elif wkts >= 10 or balls_left == 0:
         status = "lost"
+        winner = BOWLING_TEAM
     else:
         status = "in_progress"
+        winner = None
 
     if status != "in_progress":
         pressure = "over"
@@ -44,6 +47,14 @@ def compute_state(events: list[dict], upto: int) -> dict:
 
     last_wkt = max((i for i, e in enumerate(evs) if e["wicket"]), default=-1)
     partnership = sum(e["runs"] for e in evs[last_wkt + 1:])
+
+    # Batting card: runs and balls for every batter who has faced a ball, best first.
+    card: dict[str, dict] = {}
+    for e in evs:
+        b = card.setdefault(e["batter"], {"name": e["batter"], "runs": 0, "balls": 0})
+        b["runs"] += e["runs"]
+        b["balls"] += 1
+    batting_card = sorted(card.values(), key=lambda x: (-x["runs"], x["balls"]))
 
     lo = evs[-6:]
     lt = evs[-12:]
@@ -65,10 +76,12 @@ def compute_state(events: list[dict], upto: int) -> dict:
         "projected": round(crr * OVERS_LIMIT),
         "pressure": pressure,
         "status": status,
+        "winner": winner,
         "partnership_runs": partnership,
         "last_over": {"runs": sum(e["runs"] for e in lo), "wickets": sum(e["wicket"] for e in lo)},
         "last_two_overs": {"runs": sum(e["runs"] for e in lt), "wickets": sum(e["wicket"] for e in lt)},
         "on_strike": _batter(evs, on_strike),
         "non_striker": _batter(evs, non_striker),
+        "batting_card": batting_card,
         "last_ball": last["commentary"] if last else "",
     }

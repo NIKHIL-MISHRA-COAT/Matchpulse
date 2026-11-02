@@ -21,8 +21,21 @@ export const T = {
     play: "▶ Play live",
     pause: "❚❚ Pause",
     nextBall: "Next ball",
+    restart: "New match",
     wonWickets: (team, n) => `${team} won by ${n} wickets`,
     wonRuns: (team, n) => `${team} won by ${n} runs`,
+    about: {
+      title: "About MatchPulse",
+      intro: "A live cricket companion that explains the match, not just the score.",
+      items: [
+        ["Recap", "A 30-second summary of the chase: score, what is needed, pressure, and the last over."],
+        ["Feed", "Every delivery as it happens. Tap any ball to see why it mattered."],
+        ["Ask", "Questions like 'who scored more?' or 'is the chase realistic?', answered from the live numbers."],
+        ["Next ball / Play live", "Moves the simulated match forward, one ball at a time or continuously."],
+        ["New match", "Restarts with a different situation: a last-over thriller, a comfortable chase, a collapse, or a narrow defeat."],
+        ["Note", "This is a simulated match for demonstration. It is not live cricket data."],
+      ],
+    },
   },
   hi: {
     loading: "मैच लोड हो रहा है…",
@@ -46,7 +59,20 @@ export const T = {
     play: "▶ लाइव चलाएँ",
     pause: "❚❚ रोकें",
     nextBall: "अगली गेंद",
+    restart: "नया मैच",
     wonWickets: (team, n) => `${team} ने ${n} विकेट से जीत दर्ज की`,
     wonRuns: (team, n) => `${team} ने ${n} रन से जीत दर्ज की`,
+    about: {
+      title: "MatchPulse के बारे में",
+      intro: "एक लाइव क्रिकेट साथी जो सिर्फ़ स्कोर नहीं, मैच समझाता है।",
+      items: [
+        ["रीकैप", "चेज़ का 30 सेकंड का सार: स्कोर, ज़रूरत, दबाव और आख़िरी ओवर।"],
+        ["फ़ीड", "हर गेंद जैसे ही होती है। किसी भी गेंद पर टैप करें और जानें वह क्यों मायने रखती है।"],
+        ["पूछें", "'किसने ज़्यादा रन बनाए?' या 'क्या चेज़ संभव है?' जैसे सवाल, लाइव आंकड़ों से जवाब।"],
+        ["अगली गेंद / लाइव चलाएँ", "सिमुलेटेड मैच को एक-एक गेंद या लगातार आगे बढ़ाता है।"],
+        ["नया मैच", "नई स्थिति से शुरू करता है: आख़िरी ओवर का रोमांच, आसान चेज़, विकेट ढहना, या कम अंतर की हार।"],
+        ["नोट", "यह डेमो के लिए सिमुलेटेड मैच है। यह असली क्रिकेट डेटा नहीं है।"],
+      ],
+    },
   },
 };

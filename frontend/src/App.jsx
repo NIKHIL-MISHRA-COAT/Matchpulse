@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { advance, getMatch } from "./api";
+import { advance, getMatch, reset } from "./api";
 import { T } from "./i18n";
 import Scoreboard from "./components/Scoreboard";
 import CatchUp from "./components/CatchUp";
 import Feed from "./components/Feed";
 import Ask from "./components/Ask";
+import Sidebar from "./components/Sidebar";
 
 const TABS = ["catchup", "feed", "ask"];
 
@@ -59,6 +60,12 @@ export default function App() {
     if (data && data.state.status !== "in_progress") setPlaying(false);
   }, [data]);
 
+  async function restart() {
+    setPlaying(false);
+    setTab("catchup");
+    await load(reset);
+  }
+
   if (!data) {
     return (
       <div className="grid min-h-screen place-items-center font-display text-2xl uppercase text-lime">
@@ -71,30 +78,40 @@ export default function App() {
 
   return (
     <div className="min-h-screen pb-36">
+      <Sidebar t={t} />
       <Ticker items={data.feed.slice(0, 6)} />
 
       <div className="mx-auto max-w-md px-4 pt-5">
         <motion.header
           initial={{ x: -30, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
-          className="mb-4 flex items-end justify-between"
+          className="mb-4 flex items-end justify-between gap-3"
         >
           <div>
             <h1 className="font-display text-4xl uppercase italic leading-none tracking-wide">
               Match<span className="text-lime">Pulse</span>
             </h1>
-            <p className="mt-1 text-[11px] uppercase tracking-[0.25em] text-white/50">{data.title}</p>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-white/50">{data.title}</p>
           </div>
-          <div className="flex border-2 border-lime text-xs font-bold">
-            {["en", "hi"].map((l) => (
-              <button
-                key={l}
-                onClick={() => setLang(l)}
-                className={`px-3 py-1 ${lang === l ? "bg-lime text-ink" : "text-lime"}`}
-              >
-                {l === "en" ? "EN" : "हिं"}
-              </button>
-            ))}
+          <div className="flex items-stretch gap-2">
+            <motion.button
+              whileTap={{ scale: 0.94 }}
+              onClick={restart}
+              className="border-2 border-alert px-3 text-xs font-bold uppercase tracking-wide text-alert"
+            >
+              ↻ {t.restart}
+            </motion.button>
+            <div className="flex border-2 border-lime text-xs font-bold">
+              {["en", "hi"].map((l) => (
+                <button
+                  key={l}
+                  onClick={() => setLang(l)}
+                  className={`px-3 py-1 ${lang === l ? "bg-lime text-ink" : "text-lime"}`}
+                >
+                  {l === "en" ? "EN" : "हिं"}
+                </button>
+              ))}
+            </div>
           </div>
         </motion.header>
 

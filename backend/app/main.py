@@ -6,7 +6,15 @@ from . import ai
 from .sim import BATTING_TEAM, TARGET, build_match
 from .stats import compute_state
 
-MATCH_EVENTS = build_match()
+# Each restart cycles to the next match situation. Seeds were chosen for distinct outcomes.
+SCENARIOS = [
+    {"seed": 11, "name": "Last-over thriller"},
+    {"seed": 2, "name": "Comfortable chase"},
+    {"seed": 16, "name": "Batting collapse"},
+    {"seed": 18, "name": "Narrow defeat"},
+]
+STATE = {"idx": 0}
+MATCH_EVENTS = build_match(SCENARIOS[0]["seed"])
 LIVE = {"upto": min(60, len(MATCH_EVENTS))}   # start 10 overs into the chase
 
 app = FastAPI(title="MatchPulse API")
@@ -31,12 +39,16 @@ def _public(e: dict) -> dict:
     return {k: e[k] for k in ("id", "over", "batter", "bowler", "runs", "wicket", "commentary", "total")}
 
 
+def _title() -> str:
+    return f"{BATTING_TEAM} chasing {TARGET} · {SCENARIOS[STATE['idx']]['name']}"
+
+
 @app.get("/api/match")
 def get_match():
     upto = LIVE["upto"]
     recent = MATCH_EVENTS[:upto][-15:]
     return {
-        "title": f"{BATTING_TEAM} chasing {TARGET}",
+        "title": _title(),
         "state": compute_state(MATCH_EVENTS, upto),
         "feed": [_public(e) for e in reversed(recent)],
     }
@@ -45,6 +57,15 @@ def get_match():
 @app.post("/api/advance")
 def advance():
     LIVE["upto"] = min(LIVE["upto"] + 1, len(MATCH_EVENTS))
+    return get_match()
+
+
+@app.post("/api/reset")
+def reset():
+    global MATCH_EVENTS
+    STATE["idx"] = (STATE["idx"] + 1) % len(SCENARIOS)
+    MATCH_EVENTS = build_match(SCENARIOS[STATE["idx"]]["seed"])
+    LIVE["upto"] = min(60, len(MATCH_EVENTS))
     return get_match()
 
 
