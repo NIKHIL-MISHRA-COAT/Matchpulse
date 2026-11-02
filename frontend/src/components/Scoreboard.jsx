@@ -6,10 +6,10 @@ function Num({ value }) {
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span
           key={value}
-          initial={{ y: 24, opacity: 0 }}
+          initial={{ y: 40, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          exit={{ y: -24, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 380, damping: 28 }}
+          exit={{ y: -40, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 420, damping: 28 }}
           className="inline-block"
         >
           {value}
@@ -19,14 +19,21 @@ function Num({ value }) {
   );
 }
 
-const PRESSURE_STYLE = {
-  high: "bg-rose-500/20 text-rose-200",
-  tightening: "bg-amber-400/20 text-amber-200",
-  on_track: "bg-emerald-400/20 text-emerald-200",
-  over: "bg-slate-500/30 text-slate-200",
+const TAG = {
+  high: "bg-alert text-white",
+  tightening: "bg-white text-ink",
+  on_track: "bg-ink text-lime ring-2 ring-lime",
+  over: "bg-white/20 text-white",
 };
 
 export default function Scoreboard({ state: s, t }) {
+  const result =
+    s.status === "won"
+      ? t.wonWickets(s.batting_team, 10 - s.wickets)
+      : s.status === "lost"
+      ? t.wonRuns(s.bowling_team, s.need - 1)
+      : null;
+
   const stats = [
     [t.need, s.need],
     [t.rrr, s.rrr],
@@ -34,54 +41,65 @@ export default function Scoreboard({ state: s, t }) {
   ];
 
   return (
-    <motion.div
-      layout
-      className="rounded-3xl bg-gradient-to-br from-emerald-600/30 via-slate-900 to-slate-950 p-5 ring-1 ring-white/10"
-    >
-      <div className="flex items-center justify-between text-xs uppercase tracking-widest text-slate-400">
-        <span>{s.batting_team}</span>
-        <span>
-          {t.target} {s.target}
-        </span>
-      </div>
+    <motion.div layout className="relative overflow-hidden bg-lime p-5 text-ink">
+      <div className="stripes absolute inset-0" />
+      <div className="relative">
+        <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.2em]">
+          <span>{s.batting_team}</span>
+          <span>
+            {t.target} {s.target}
+          </span>
+        </div>
 
-      <div className="mt-3 flex items-end gap-2">
-        <span className="text-6xl font-black tabular-nums">
-          <Num value={s.runs} />
-        </span>
-        <span className="pb-2 text-3xl font-bold text-slate-300">
-          /<Num value={s.wickets} />
-        </span>
-        <span className="pb-3 text-sm text-slate-400">({s.overs} ov)</span>
-      </div>
+        <div className="mt-1 flex items-end gap-3 font-display leading-none">
+          <span className="text-[120px] tracking-tight">
+            <Num value={s.runs} />
+          </span>
+          <span className="pb-4 text-6xl">
+            /<Num value={s.wickets} />
+          </span>
+        </div>
+        <div className="text-sm font-bold uppercase">({s.overs} ov)</div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-        {stats.map(([label, val]) => (
-          <div key={label} className="rounded-2xl bg-white/5 py-2">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400">{label}</div>
-            <div className="text-xl font-bold tabular-nums">
-              <Num value={val} />
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {stats.map(([label, val]) => (
+            <div key={label} className="bg-ink p-2 text-center text-lime">
+              <div className="text-[10px] uppercase tracking-widest text-white/60">{label}</div>
+              <div className="font-display text-3xl tabular-nums">
+                <Num value={val} />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={s.pressure}
+            initial={{ x: -40, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={`mt-4 -skew-x-12 px-4 py-1 text-center font-display text-xl uppercase tracking-wide ${TAG[s.pressure]}`}
+          >
+            <span className="inline-block skew-x-12">{t.pressure[s.pressure]}</span>
+          </motion.div>
+        </AnimatePresence>
+
+        <p className="mt-4 text-xs font-bold uppercase tracking-wide">
+          {s.on_strike && `${s.on_strike.name} ${s.on_strike.runs}(${s.on_strike.balls})`}
+          {s.non_striker && ` • ${s.non_striker.name} ${s.non_striker.runs}(${s.non_striker.balls})`}
+        </p>
+
+        {result && (
+          <motion.div
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: 1 }}
+            transition={{ type: "spring", stiffness: 200, damping: 20 }}
+            className="mt-4 origin-left bg-ink px-4 py-3 font-display text-2xl uppercase text-lime"
+          >
+            {result}
+          </motion.div>
+        )}
       </div>
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={s.pressure}
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className={`mt-4 rounded-full px-3 py-1 text-center text-sm font-medium ${PRESSURE_STYLE[s.pressure]}`}
-        >
-          {t.pressure[s.pressure]}
-        </motion.div>
-      </AnimatePresence>
-
-      <p className="mt-4 text-sm text-slate-300">
-        {s.on_strike && `${s.on_strike.name} ${s.on_strike.runs}(${s.on_strike.balls})`}
-        {s.non_striker && ` • ${s.non_striker.name} ${s.non_striker.runs}(${s.non_striker.balls})`}
-      </p>
     </motion.div>
   );
 }

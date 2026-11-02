@@ -9,6 +9,23 @@ import Ask from "./components/Ask";
 
 const TABS = ["catchup", "feed", "ask"];
 
+function Ticker({ items }) {
+  if (!items.length) return null;
+  const line = items.map((e) => `${e.over}  ${e.commentary}`).join("   ◆   ");
+  return (
+    <div className="overflow-hidden bg-alert py-2 text-xs font-bold uppercase tracking-wider text-white">
+      <motion.div
+        className="flex w-max gap-16 whitespace-nowrap"
+        animate={{ x: ["0%", "-50%"] }}
+        transition={{ repeat: Infinity, ease: "linear", duration: 35 }}
+      >
+        <span>{line}</span>
+        <span>{line}</span>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function App() {
   const [data, setData] = useState(null);
   const [lang, setLang] = useState("en");
@@ -44,83 +61,97 @@ export default function App() {
 
   if (!data) {
     return (
-      <div className="grid min-h-screen place-items-center text-slate-300">
+      <div className="grid min-h-screen place-items-center font-display text-2xl uppercase text-lime">
         {error ? T.en.error : T.en.loading}
       </div>
     );
   }
 
+  const over = data.state.status !== "in_progress";
+
   return (
-    <div className="mx-auto min-h-screen max-w-md px-4 pb-32 pt-6">
-      <motion.header
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-4 flex items-center justify-between"
-      >
-        <div>
-          <h1 className="text-xl font-black tracking-tight">MatchPulse</h1>
-          <p className="text-xs text-slate-400">{data.title}</p>
-        </div>
-        <div className="flex rounded-full bg-white/10 p-1 text-xs">
-          {["en", "hi"].map((l) => (
-            <button key={l} onClick={() => setLang(l)} className="relative rounded-full px-3 py-1">
-              {lang === l && (
-                <motion.span layoutId="lang" className="absolute inset-0 rounded-full bg-emerald-500" />
-              )}
-              <span className={`relative ${lang === l ? "font-semibold text-slate-950" : "text-slate-300"}`}>
+    <div className="min-h-screen pb-36">
+      <Ticker items={data.feed.slice(0, 6)} />
+
+      <div className="mx-auto max-w-md px-4 pt-5">
+        <motion.header
+          initial={{ x: -30, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          className="mb-4 flex items-end justify-between"
+        >
+          <div>
+            <h1 className="font-display text-4xl uppercase italic leading-none tracking-wide">
+              Match<span className="text-lime">Pulse</span>
+            </h1>
+            <p className="mt-1 text-[11px] uppercase tracking-[0.25em] text-white/50">{data.title}</p>
+          </div>
+          <div className="flex border-2 border-lime text-xs font-bold">
+            {["en", "hi"].map((l) => (
+              <button
+                key={l}
+                onClick={() => setLang(l)}
+                className={`px-3 py-1 ${lang === l ? "bg-lime text-ink" : "text-lime"}`}
+              >
                 {l === "en" ? "EN" : "हिं"}
-              </span>
+              </button>
+            ))}
+          </div>
+        </motion.header>
+
+        <Scoreboard state={data.state} t={t} />
+
+        <nav className="mt-5 grid grid-cols-3 gap-2">
+          {TABS.map((id) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`relative py-3 font-display text-lg uppercase tracking-wide ${
+                tab === id ? "text-ink" : "text-white/50"
+              }`}
+            >
+              {tab === id && (
+                <motion.span
+                  layoutId="tab"
+                  className="absolute inset-0 -skew-x-12 bg-lime"
+                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
+                />
+              )}
+              <span className="relative">{t.tabs[id]}</span>
             </button>
           ))}
-        </div>
-      </motion.header>
+        </nav>
 
-      <Scoreboard state={data.state} t={t} />
-
-      <nav className="mt-5 grid grid-cols-3 border-b border-white/10">
-        {TABS.map((id) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            className={`relative py-3 text-sm ${tab === id ? "text-white" : "text-slate-400"}`}
+        <AnimatePresence mode="wait">
+          <motion.section
+            key={tab + lang}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.18 }}
+            className="mt-5"
           >
-            {t.tabs[id]}
-            {tab === id && (
-              <motion.span layoutId="tab" className="absolute inset-x-4 -bottom-px h-0.5 rounded bg-emerald-400" />
-            )}
-          </button>
-        ))}
-      </nav>
+            {tab === "catchup" && <CatchUp lang={lang} t={t} />}
+            {tab === "feed" && <Feed events={data.feed} lang={lang} t={t} />}
+            {tab === "ask" && <Ask lang={lang} t={t} />}
+          </motion.section>
+        </AnimatePresence>
+      </div>
 
-      <AnimatePresence mode="wait">
-        <motion.section
-          key={tab + lang}
-          initial={{ opacity: 0, x: 16 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -16 }}
-          transition={{ duration: 0.18 }}
-          className="mt-5"
-        >
-          {tab === "catchup" && <CatchUp lang={lang} t={t} />}
-          {tab === "feed" && <Feed events={data.feed} lang={lang} t={t} />}
-          {tab === "ask" && <Ask lang={lang} t={t} />}
-        </motion.section>
-      </AnimatePresence>
-
-      <div className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-slate-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-md gap-2 p-3">
+      <div className="fixed inset-x-0 bottom-0 border-t-2 border-lime bg-ink/95 backdrop-blur">
+        <div className="mx-auto flex max-w-md gap-3 p-3">
           <button
             onClick={() => setPlaying((p) => !p)}
-            disabled={data.state.status !== "in_progress"}
-            className="flex-1 rounded-xl bg-white/10 py-2 text-sm disabled:opacity-40"
+            disabled={over}
+            className="flex-1 border-2 border-white/20 py-3 font-display text-lg uppercase tracking-wide disabled:opacity-30"
           >
             {playing ? t.pause : t.play}
           </button>
           <motion.button
-            whileTap={{ scale: 0.96 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.94, skewX: -6 }}
             onClick={() => load(advance)}
-            disabled={data.state.status !== "in_progress"}
-            className="flex-1 rounded-xl bg-emerald-500 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40"
+            disabled={over}
+            className="flex-[1.4] bg-lime py-3 font-display text-lg uppercase tracking-wide text-ink shadow-[6px_6px_0_#ff2d55] disabled:opacity-30"
           >
             {t.nextBall}
           </motion.button>
