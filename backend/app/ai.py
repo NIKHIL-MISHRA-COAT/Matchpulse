@@ -339,3 +339,74 @@ async def answer(question: str, state: dict, lang: str) -> tuple[str, bool]:
         return REFUSAL[lang], True
     task = f"Answer this fan question using only the facts: {question}"
     return await _answer(task, state, lang, _fallback_ask(question, state, lang)), False
+
+# ---------- Watch-for cues (second screen) ----------
+
+def _phase(balls: int) -> str:
+    if balls < 36:
+        return "powerplay"
+    if balls >= 96:
+        return "death"
+    return "middle"
+
+
+PHASE_CUE = {
+    "en": {
+        "powerplay": "Powerplay: only two fielders can be outside the circle, so watch for early boundaries.",
+        "middle": "Middle overs: watch how the batters rotate strike and when spin comes into the attack.",
+        "death": "Death overs: {need} needed from {balls_left} balls. Watch for yorkers and slower balls.",
+    },
+    "hi": {
+        "powerplay": "पावरप्ले: शुरुआती ओवरों में चौके ज़्यादा आ सकते हैं, इन पर नज़र रखें।",
+        "middle": "मिडिल ओवर: देखें बल्लेबाज़ स्ट्राइक कैसे बदलते हैं और स्पिन कब आती है।",
+        "death": "डेथ ओवर: {need} रन {balls_left} गेंदों में चाहिए। यॉर्कर और धीमी गेंदों पर नज़र रखें।",
+    },
+}
+
+PRESSURE_CUE = {
+    "en": {
+        "high": "The required rate is well above the current rate, so the chase needs a big over.",
+        "tightening": "The required rate is creeping above the run rate. A dot ball now costs more.",
+        "on_track": "The chase is on track. Watch for a wicket that could change the pace.",
+    },
+    "hi": {
+        "high": "आवश्यक रन रेट मौजूदा रेट से काफ़ी ऊपर है, चेज़ को बड़े ओवर की ज़रूरत है।",
+        "tightening": "आवश्यक रन रेट धीरे-धीरे रन रेट से ऊपर जा रहा है। अब डॉट बॉल ज़्यादा महंगी है।",
+        "on_track": "चेज़ ठीक चल रहा है। ऐसे विकेट पर नज़र रखें जो रफ़्तार बदल सकता है।",
+    },
+}
+
+
+def _fallback_notices(s: dict, lang: str) -> list[str]:
+    hi = lang == "hi"
+    if s["status"] != "in_progress":
+        return [_winner_line(s, lang)]
+
+    phase = _phase(s["balls"])
+    cues = [PHASE_CUE[lang][phase].format(need=s["need"], balls_left=s["balls_left"])]
+    cues.append(PRESSURE_CUE[lang][s["pressure"]])
+
+    b = s["on_strike"]
+    if b:
+        sr = _sr(b["runs"], b["balls"])
+        if hi:
+            cues.append(f"{b['name']} स्ट्राइक पर हैं, स्ट्राइक रेट {sr}। देखें वे बड़े शॉट खेलते हैं या रन लेते हैं।")
+        else:
+            cues.append(f"{b['name']} is on strike at a strike rate of {sr}. Watch whether they go for big shots or rotate.")
+    return cues[:3]
+
+
+async def notices(state: dict, lang: str) -> list[str]:
+    task = (
+        "Give exactly 3 short 'watch for' cues for a fan watching the TV broadcast right now. "
+        "One cue per line, no numbering. Base each cue only on the facts."
+    )
+    try:
+        text = await _llm(task, state, lang)
+        if text:
+            lines = [line.strip(" -•*") for line in text.splitlines() if line.strip()]
+            if lines:
+                return lines[:3]
+    except Exception:
+        pass
+    return _fallback_notices(state, lang)

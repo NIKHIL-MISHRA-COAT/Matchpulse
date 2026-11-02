@@ -7,8 +7,9 @@ import CatchUp from "./components/CatchUp";
 import Feed from "./components/Feed";
 import Ask from "./components/Ask";
 import Sidebar from "./components/Sidebar";
+import WatchFor from "./components/WatchFor";
 
-const TABS = ["catchup", "feed", "ask"];
+const TABS = ["catchup", "feed", "watch", "ask"];
 
 function Ticker({ items }) {
   if (!items.length) return null;
@@ -117,7 +118,7 @@ export default function App() {
 
         <Scoreboard state={data.state} t={t} />
 
-        <nav className="mt-5 grid grid-cols-3 gap-2">
+        <nav className="mt-5 grid grid-cols-4 gap-2">
           {TABS.map((id) => (
             <button
               key={id}
@@ -150,6 +151,7 @@ export default function App() {
             {tab === "catchup" && <CatchUp lang={lang} t={t} />}
             {tab === "feed" && <Feed events={data.feed} lang={lang} t={t} />}
             {tab === "ask" && <Ask lang={lang} t={t} />}
+            {tab === "watch" && <WatchFor lang={lang} t={t} ballKey={data.state.balls} />}
           </motion.section>
         </AnimatePresence>
       </div>

@@ -13,7 +13,7 @@ const post = (path, body) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ?? {}),
   }).then(json);
-
+export const notices = (lang) => fetch(`${BASE}/api/notices?lang=${lang}`).then(json);
 export const getMatch = () => fetch(`${BASE}/api/match`).then(json);
 export const advance = () => post("/api/advance");
 export const reset = () => post("/api/reset");

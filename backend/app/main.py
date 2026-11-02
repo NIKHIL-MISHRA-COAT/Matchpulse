@@ -94,3 +94,9 @@ async def ask(body: AskIn):
 async def catchup(lang: str = "en"):
     state = compute_state(MATCH_EVENTS, LIVE["upto"])
     return {"text": await ai.catchup(state, _lang(lang))}
+
+
+@app.get("/api/notices")
+async def notices(lang: str = "en"):
+    state = compute_state(MATCH_EVENTS, LIVE["upto"])
+    return {"items": await ai.notices(state, _lang(lang))}
